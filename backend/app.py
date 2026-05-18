@@ -1166,34 +1166,45 @@ def _update_reading_stats(user_id, book):
 
 
 def _calculate_reading_streak(user_id):
-    """Calculate the user's current reading streak in days."""
+    """Calculate the user's current reading streak in days.
+
+    Multiple books finished on the same calendar day count as a single
+    streak day, fixing the bug reported in issue #513.
+    """
     finished_items = ShelfItem.query.filter_by(
         user_id=user_id, shelf_type='finished'
     ).filter(ShelfItem.finished_at.isnot(None)).order_by(ShelfItem.finished_at.desc()).all()
-    
+
     if not finished_items:
         return 0
-    
+
+    # Deduplicate dates so two books on the same day count as one streak day.
+    # Without this, days_diff == 0 silently skips and corrupts prev_date,
+    # causing the next iteration to see a false gap and break early.
+    unique_dates = sorted(
+        {item.finished_at.date() for item in finished_items},
+        reverse=True,
+    )
+
     now = datetime.now(timezone.utc)
     today = now.date()
-    most_recent = finished_items[0].finished_at.date()
-    
+    most_recent = unique_dates[0]
+
     if (today - most_recent).days > 1:
         return 0
-    
+
     streak = 1
     prev_date = most_recent
-    
-    for item in finished_items[1:]:
-        finish_date = item.finished_at.date()
+
+    for finish_date in unique_dates[1:]:
         days_diff = (prev_date - finish_date).days
-        
+
         if days_diff == 1:
             streak += 1
             prev_date = finish_date
-        elif days_diff > 1:
+        else:
             break
-    
+
     return streak
 
 
